@@ -1,1 +1,0 @@
-web: gunicorn voice_pdf_rag.wsgi:application --bind 0.0.0.0:$PORT
