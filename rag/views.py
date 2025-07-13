@@ -448,3 +448,11 @@ def serve_audio(request, filename):
     except Exception as e:
         logger.error(f"Error serving audio file {filename}: {str(e)}")
         return JsonResponse({'status': f"Failed: Error serving audio: {str(e)}"}, status=500)
+    
+def upload_pdf(request):
+    if request.method == 'POST' and request.FILES.get('pdf'):
+        pdf_file = request.FILES['pdf']
+        file_path = default_storage.save(f'uploads/{pdf_file.name}', pdf_file)
+        # Process PDF
+        return HttpResponse(f"Uploaded: {file_path}")
+    return HttpResponse("Invalid request")
