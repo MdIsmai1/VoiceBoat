@@ -1,0 +1,8 @@
+/* Tailwind CSS is included via CDN in index.html */
+/* Add custom styles here if needed */
+.custom-container {
+    max-width: 1280px;
+    margin-left: auto;
+    margin-right: auto;
+    padding: 1rem;
+}

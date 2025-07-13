@@ -1,0 +1,164 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice PDF RAG Bot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="{% static 'css/styles.css' %}">
+    <style>
+        /* Custom styles to mimic Gradio's gr.themes.Soft and provided CSS */
+        .gr-container { 
+            max-width: 1280px; 
+            margin: 0 auto; 
+            padding: 1rem; 
+        }
+        .gr-row { 
+            display: flex; 
+            flex-direction: row; 
+            gap: 1.5rem; 
+        }
+        .gr-column { 
+            background: #fff; 
+            border-radius: 0.5rem; 
+            padding: 1.5rem; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1); 
+        }
+        .gr-button { 
+            font-size: 1rem; 
+            padding: 0.5rem 1rem; 
+            border-radius: 0.375rem; 
+            transition: background-color 0.2s; 
+        }
+        .gr-button-primary { 
+            background: #2563eb; 
+            color: white; 
+        }
+        .gr-button-primary:hover:not(:disabled) { 
+            background: #1e40af; 
+        }
+        .gr-button-secondary { 
+            background: #6b7280; 
+            color: white; 
+        }
+        .gr-button-secondary:hover:not(:disabled) { 
+            background: #4b5563; 
+        }
+        .gr-textbox, .gr-file, .gr-audio { 
+            width: 100%; 
+            border: 1px solid #d1d5db; 
+            border-radius: 0.375rem; 
+            padding: 0.5rem; 
+        }
+        .gr-markdown { 
+            font-size: 1rem; 
+            color: #4b5563; 
+        }
+        .gr-label { 
+            font-size: 0.875rem; 
+            font-weight: 500; 
+            color: #374151; 
+            margin-bottom: 0.5rem; 
+        }
+        @media (max-width: 768px) {
+            .gr-row { 
+                flex-direction: column !important; 
+            }
+            .gr-button { 
+                font-size: 1rem !important; 
+                padding: 0.625rem !important; 
+            }
+            .gr-textbox, .gr-file, .gr-audio { 
+                width: 100% !important; 
+            }
+            .gr-markdown { 
+                font-size: 0.875rem !important; 
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen flex flex-col">
+    <div class="gr-container">
+        <h1 class="text-3xl font-bold text-gray-800 mb-2">Voice PDF RAG Bot</h1>
+        <p class="gr-markdown text-gray-600 mb-6">AI-Powered Voice Bot: Upload a PDF, ask questions via microphone or text, and get audio answers.</p>
+        <hr class="border-gray-300 mb-6">
+        <input type="hidden" id="sessionId" value="{{ session_id }}">
+        
+        <div class="gr-row">
+            <!-- Left Column: Upload & Ask -->
+            <div class="gr-column w-full md:w-1/3">
+                <h2 class="text-xl font-semibold text-gray-800 mb-4">Upload & Ask</h2>
+                <div class="mb-4">
+                    <label class="gr-label block">Upload PDF</label>
+                    <input type="file" id="pdfInput" accept=".pdf" class="gr-file">
+                </div>
+                <div class="mb-4">
+                    <label class="gr-label block">Record Question</label>
+                    <button id="recordButton" class="gr-button gr-button-primary">Start Recording</button>
+                    <button id="stopRecordButton" class="gr-button bg-red-500 text-white hover:bg-red-600 hidden">Stop Recording</button>
+                    <div id="recordingIndicator" class="hidden mt-2 flex items-center">
+                        <span class="inline-block h-3 w-3 bg-red-500 rounded-full animate-pulse"></span>
+                        <span class="ml-2 text-sm text-red-600">Recording...</span>
+                    </div>
+                </div>
+                <div class="mb-4">
+                    <label class="gr-label block">Type Question</label>
+                    <input type="text" id="textInput" placeholder="Enter your question..." class="gr-textbox">
+                </div>
+                <div class="flex gap-2 mb-4">
+                    <button id="submitButton" class="gr-button gr-button-primary" disabled>Get Answer</button>
+                    <button id="resetButton" class="gr-button gr-button-secondary">Reset Bot</button>
+                </div>
+                <div class="mb-4">
+                    <label class="gr-label block">Microphone Status</label>
+                    <p id="micStatus" class="gr-markdown text-gray-600">Checking microphone access...</p>
+                </div>
+                <div class="mb-4">
+                    <label class="gr-label block">Reset Status</label>
+                    <p id="resetStatus" class="gr-markdown text-gray-600"></p>
+                </div>
+                <p class="gr-markdown text-gray-500 text-sm">
+                    <strong>Tips:</strong><br>
+                    - Use clear questions<br>
+                    - Grant microphone access on mobile<br>
+                    - PDFs must be readable, not encrypted
+                </p>
+            </div>
+            
+            <!-- Right Column: Response -->
+            <div class="gr-column w-full md:w-2/3">
+                <h2 class="text-xl font-semibold text-gray-800 mb-4">Response</h2>
+                <div class="mb-4">
+                    <label class="gr-label block">Audio Response</label>
+                    <audio id="audioOutput" controls class="gr-audio"></audio>
+                </div>
+                <div class="mb-4">
+                    <label class="gr-label block">Processing Status</label>
+                    <div id="loadingIndicator" class="gr-markdown text-gray-600 flex items-center">
+                        <svg class="animate-spin h-5 w-5 mr-2 hidden" id="spinner" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+                        </svg>
+                        <span>Ready to process your query.</span>
+                    </div>
+                </div>
+                <div class="mb-4">
+                    <button id="summaryButton" class="gr-button gr-button-secondary">Toggle Conversation Summary</button>
+                </div>
+                <div>
+                    <label class="gr-label block">Conversation Summary</label>
+                    <div id="summaryOutput" class="gr-markdown text-gray-600"></div>
+                </div>
+            </div>
+        </div>
+        
+        <hr class="border-gray-300 my-6">
+        <p class="gr-markdown text-gray-500 text-sm">Built with: LangChain, Ollama, Chroma, Django, gTTS, Tesseract OCR</p>
+    </div>
+    <script>
+        window.csrfToken = "{{ csrf_token }}";
+    </script>
+    <script src="{% static 'js/main.js' %}"></script>
+</body>
+</html>
