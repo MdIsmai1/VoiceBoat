@@ -8,15 +8,12 @@ import cloudinary
 import cloudinary.uploader
 import cloudinary.api
 
-# Build paths
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Security
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-please-replace-this-with-a-secure-key-in-production')
 DEBUG = os.getenv('DJANGO_ENV', 'development') == 'development'
-ALLOWED_HOSTS = ['localhost', '127.0.0.1'] if DEBUG else ['voice-pdf-rag.onrender.com']
+ALLOWED_HOSTS = ['localhost', '127.0.0.1'] if DEBUG else ['voiceboat.onrender.com']
 
-# Application definition
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -25,7 +22,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rag',
-    'cloudinary_storage',  # Add Cloudinary storage
+    'cloudinary_storage',
     'cloudinary',
 ]
 
@@ -59,7 +56,6 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'voice_pdf_rag.wsgi.application'
 
-# Database
 if os.getenv('DJANGO_ENV', 'development') == 'development':
     DATABASES = {
         'default': {
@@ -72,7 +68,6 @@ else:
         'default': dj_database_url.config(default=os.getenv('DATABASE_URL'), conn_max_age=600)
     }
 
-# Password validation
 AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validators.UserAttributeSimilarityValidator',
@@ -88,18 +83,15 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-# Internationalization
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
 
-# Static files
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [BASE_DIR / 'static']
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
-# Media files (Cloudinary for production)
 if os.getenv('DJANGO_ENV', 'development') != 'development':
     CLOUDINARY_STORAGE = {
         'CLOUD_NAME': os.getenv('CLOUDINARY_CLOUD_NAME'),
@@ -112,5 +104,4 @@ else:
     MEDIA_URL = '/media/'
     MEDIA_ROOT = BASE_DIR / 'media'
 
-# Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
