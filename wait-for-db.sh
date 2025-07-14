@@ -1,5 +1,4 @@
 #!/bin/bash
-# wait-for-db.sh
 set -e
 
 if [ -z "$DATABASE_URL" ]; then
