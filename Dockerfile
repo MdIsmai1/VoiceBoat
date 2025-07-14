@@ -22,12 +22,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Collect static files
+# Collect static files with verbose output
 RUN python manage.py collectstatic --no-input --verbosity 2
 
 # Copy and make wait-for-db.sh executable
 COPY wait-for-db.sh .
 RUN chmod +x wait-for-db.sh
 
-# Run migrations with verbose output and database check
-CMD ["sh", "-c", "./wait-for-db.sh && python manage.py makemigrations rag --verbosity 3 && python manage.py migrate --verbosity 3 && gunicorn --bind 0.0.0.0:${PORT:-10000} voice_pdf_rag.wsgi:application --log-level debug"]
+# Check for migrations, generate if needed, and apply with verbose output
+CMD ["sh", "-c", "./wait-for-db.sh && python manage.py makemigrations rag --check --verbosity 3 || python manage.py makemigrations rag --verbosity 3 && python manage.py migrate --verbosity 3 && gunicorn --bind 0.0.0.0:${PORT:-10000} voice_pdf_rag.wsgi:application --log-level debug"]
