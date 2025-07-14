@@ -1,29 +1,25 @@
 from django.db import models
 import uuid
 
-class Session(models.Model):
-    session_id = models.UUIDField(primary_key=True, default=uuid.uuid4)
-    django_session_key = models.CharField(max_length=40, unique=True, null=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    last_activity = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        app_label = 'rag'
-
 class Pdf(models.Model):
-    pdf_id = models.UUIDField(primary_key=True, default=uuid.uuid4)
-    file_name = models.CharField(max_length=255, null=True, blank=True)
-    pdf_hash = models.CharField(max_length=64)
-    session = models.ForeignKey(Session, on_delete=models.CASCADE)
+    pdf_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # Other fields (add your existing fields here, e.g., file_name, etc.)
+    file_name = models.CharField(max_length=255)  # Example field, adjust as needed
 
     class Meta:
-        app_label = 'rag'
+        db_table = 'pdf'  # Optional: ensures table name is 'pdf'
 
+# Other models (e.g., ConversationHistory, Session) can remain unchanged
 class ConversationHistory(models.Model):
-    session = models.ForeignKey(Session, on_delete=models.CASCADE)
-    question = models.TextField()
-    answer = models.TextField()
-    timestamp = models.DateTimeField(auto_now_add=True)
+    # Add your fields here
+    pass
 
     class Meta:
-        app_label = 'rag'
+        db_table = 'conversationhistory'
+
+class Session(models.Model):
+    # Add your fields here
+    pass
+
+    class Meta:
+        db_table = 'session'
