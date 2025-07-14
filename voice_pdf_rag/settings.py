@@ -12,7 +12,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-please-replace-this-with-a-secure-key-in-production')
 DEBUG = os.getenv('DJANGO_ENV', 'development') == 'development'
-ALLOWED_HOSTS = ['localhost', '127.0.0.1'] if DEBUG else ['voiceboat.onrender.com']
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -56,6 +56,8 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'voice_pdf_rag.wsgi.application'
 
+SESSION_ENGINE = 'django.contrib.sessions.backends.db'
+
 if os.getenv('DJANGO_ENV', 'development') == 'development':
     DATABASES = {
         'default': {
@@ -65,7 +67,11 @@ if os.getenv('DJANGO_ENV', 'development') == 'development':
     }
 else:
     DATABASES = {
-        'default': dj_database_url.config(default=os.getenv('DATABASE_URL'), conn_max_age=600)
+        'default': dj_database_url.config(
+            default=os.getenv('DATABASE_URL'),
+            conn_max_age=600,
+            conn_health_checks=True
+        )
     }
 
 AUTH_PASSWORD_VALIDATORS = [
@@ -105,3 +111,23 @@ else:
     MEDIA_ROOT = BASE_DIR / 'media'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': 'INFO',
+        },
+        'rag': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+        },
+    },
+}
