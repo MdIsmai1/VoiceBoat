@@ -2,7 +2,7 @@
 
 # Check if DATABASE_URL is set
 if [ -z "$DATABASE_URL" ]; then
-    echo "Warning: DATABASE_URL is not set. Skipping database check and proceeding with deployment."
+    echo "Warning: DATABASE_URL is not set. Using SQLite fallback."
     exit 0
 fi
 
@@ -17,8 +17,8 @@ if [ -z "$host" ]; then
 fi
 
 if [ -z "$host" ]; then
-    echo "Warning: Could not parse host from DATABASE_URL: $DATABASE_URL. Skipping database check."
-    exit 0
+    echo "Error: Could not parse host from DATABASE_URL: $DATABASE_URL"
+    exit 1
 fi
 
 if [ -z "$port" ]; then
