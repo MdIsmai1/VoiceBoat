@@ -12,7 +12,7 @@ class Session(models.Model):
 
 class Pdf(models.Model):
     pdf_id = models.UUIDField(primary_key=True, default=uuid.uuid4)
-    file_name = models.CharField(max_length=255, null=True, blank=True)  # Reintroduced to match migration
+    file_name = models.CharField(max_length=255, null=True, blank=True)
     pdf_hash = models.CharField(max_length=64)
     session = models.ForeignKey(Session, on_delete=models.CASCADE)
 
