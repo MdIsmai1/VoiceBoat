@@ -25,5 +25,5 @@ RUN python manage.py collectstatic --no-input
 # Run migrations
 RUN python run_migrations.py
 
-# Expose port (Render sets PORT environment variable)
-CMD ["gunicorn", "voice_pdf_rag.wsgi:application", "--bind", "0.0.0.0:${PORT:-8000}"]
+# Start Gunicorn with PORT environment variable
+CMD gunicorn voice_pdf_rag.wsgi:application --bind 0.0.0.0:$PORT
