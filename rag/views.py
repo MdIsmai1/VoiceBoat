@@ -272,9 +272,14 @@ async def save_tts_audio(text: str, audio_response_path: str, voice_gender: str 
 
 def index(request):
     logger.debug("Serving index.html")
-    if not request.session.session_key:
-        request.session.create()
-    request.session.modified = True
+    try:
+        if not request.session.session_key:
+            request.session.create()
+            logger.info(f"Created new session: {request.session.session_key}")
+        request.session.modified = True
+    except Exception as e:
+        logger.error(f"Session creation failed: {str(e)}")
+        return HttpResponse(f"Session error: {str(e)}", status=500)
     return render(request, 'index.html', {'csrf_token': get_token(request), 'session_id': request.session.session_key})
 
 @csrf_exempt
