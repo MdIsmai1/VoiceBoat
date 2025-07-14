@@ -8,19 +8,22 @@ fi
 
 # Parse host and port from DATABASE_URL
 # Example: postgresql://user:password@host:port/dbname
-host=$(echo $DATABASE_URL | grep -oP '(?<=@)[^:/]+' || echo "")
-port=$(echo $DATABASE_URL | grep -oP ':[0-9]+(?=/)' | cut -d':' -f2 || echo "")
+host=$(echo $DATABASE_URL | grep -oP '(?<=@)[^/]+' | cut -d':' -f1 || echo "")
+port=$(echo $DATABASE_URL | grep -oP ':[0-9]+(?=/)' | cut -d':' -f2 || echo "5432")  # Default to 5432 if port not found
 
-# Fallback if initial parsing fails
-if [ -z "$host" ] || [ -z "$port" ]; then
-    # Alternative parsing for non-standard formats
-    host=$(echo $DATABASE_URL | grep -oP '(?<=@)[^/]+(?=:[0-9]+/)' || echo "")
-    port=$(echo $DATABASE_URL | grep -oP ':[0-9]+(?=/)' | cut -d':' -f2 || echo "")
+# Fallback for Render-specific URLs (e.g., host includes region like .oregon-postgres.render.com)
+if [ -z "$host" ]; then
+    host=$(echo $DATABASE_URL | grep -oP '(?<=@)[^/]+(?=/)' || echo "")
 fi
 
-if [ -z "$host" ] || [ -z "$port" ]; then
-    echo "Warning: Could not parse host or port from DATABASE_URL: $DATABASE_URL. Skipping database check."
+if [ -z "$host" ]; then
+    echo "Warning: Could not parse host from DATABASE_URL: $DATABASE_URL. Skipping database check."
     exit 0
+fi
+
+if [ -z "$port" ]; then
+    port="5432"  # Default PostgreSQL port
+    echo "Warning: Could not parse port from DATABASE_URL: $DATABASE_URL. Using default port 5432."
 fi
 
 echo "Waiting for database at $host:$port..."
