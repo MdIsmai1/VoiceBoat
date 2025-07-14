@@ -17,6 +17,7 @@ from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
 from django.middleware.csrf import get_token
+from django.core.files.storage import default_storage
 from asgiref.sync import sync_to_async, async_to_sync
 from gtts import gTTS
 import speech_recognition as sr
@@ -51,7 +52,7 @@ llm = ChatOllama(model="llama3.2")
 VOICE_IDS = {'male': 'en-US'}
 vector_db_cache: Dict[str, Chroma] = {}
 vector_db_cache_lock = Lock()
-executor = ThreadPoolExecutor(max_workers=10)  # Increased for multi-user support
+executor = ThreadPoolExecutor(max_workers=10)
 
 def check_dependencies():
     required_modules = ['gtts', 'speech_recognition', 'PyPDF2', 'pdf2image', 'pytesseract', 'langchain_core', 'langchain_ollama', 'langchain_community', 'numpy', 'soundfile', 'chromadb', 'pydub']
@@ -162,7 +163,7 @@ async def process_pdf(pdf_file: str, session_id: str) -> Tuple[Optional[Chroma],
             session = await sync_to_async(lambda: Session.objects.get(session_id=session_id))()
             await sync_to_async(Pdf.objects.create)(
                 session=session,
-                pdf_path=str(pdf_path),
+                file_name=pdf_path.name,
                 pdf_hash=pdf_hash
             )
             
@@ -270,6 +271,16 @@ async def save_tts_audio(text: str, audio_response_path: str, voice_gender: str 
         logger.error(f"Failed to generate audio: {str(e)}")
         raise
 
+def health_check(request):
+    logger.debug("Received /health request")
+    try:
+        from django.contrib.sessions.models import Session
+        Session.objects.count()
+        return HttpResponse("OK", status=200)
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+        return HttpResponse(f"Database error: {str(e)}", status=500)
+
 def index(request):
     logger.debug("Serving index.html")
     try:
@@ -277,10 +288,10 @@ def index(request):
             request.session.create()
             logger.info(f"Created new session: {request.session.session_key}")
         request.session.modified = True
+        return render(request, 'index.html', {'csrf_token': get_token(request), 'session_id': request.session.session_key})
     except Exception as e:
-        logger.error(f"Session creation failed: {str(e)}")
+        logger.error(f"Session creation failed in index view: {str(e)}")
         return HttpResponse(f"Session error: {str(e)}", status=500)
-    return render(request, 'index.html', {'csrf_token': get_token(request), 'session_id': request.session.session_key})
 
 @csrf_exempt
 @async_to_sync
@@ -289,8 +300,9 @@ async def ask(request):
     try:
         if not request.session.session_key:
             request.session.create()
-            request.session.modified = True
+            logger.info(f"Created new session: {request.session.session_key}")
         session_id = request.session.session_key
+        request.session.modified = True
         logger.debug(f"Session ID: {session_id}")
 
         # Update session last_activity
@@ -377,8 +389,9 @@ async def summary(request):
     try:
         if not request.session.session_key:
             request.session.create()
-            request.session.modified = True
+            logger.info(f"Created new session: {request.session.session_key}")
         session_id = request.session.session_key
+        request.session.modified = True
         logger.debug(f"Session ID: {session_id}")
 
         # Update session last_activity
@@ -411,8 +424,9 @@ async def reset(request):
     try:
         if not request.session.session_key:
             request.session.create()
-            request.session.modified = True
+            logger.info(f"Created new session: {request.session.session_key}")
         session_id = request.session.session_key
+        request.session.modified = True
         logger.debug(f"Resetting session {session_id}")
 
         # Update session last_activity
@@ -434,7 +448,7 @@ async def reset(request):
         await sync_to_async(Session.objects.filter(session_id=session_id).delete)()
 
         # Create a new session
-        request.session.flush()  # Clear the current session
+        request.session.flush()
         request.session.create()
         request.session.modified = True
         new_session_id = request.session.session_key
@@ -453,11 +467,30 @@ def serve_audio(request, filename):
     except Exception as e:
         logger.error(f"Error serving audio file {filename}: {str(e)}")
         return JsonResponse({'status': f"Failed: Error serving audio: {str(e)}"}, status=500)
-    
-def upload_pdf(request):
-    if request.method == 'POST' and request.FILES.get('pdf'):
-        pdf_file = request.FILES['pdf']
-        file_path = default_storage.save(f'uploads/{pdf_file.name}', pdf_file)
-        # Process PDF
-        return HttpResponse(f"Uploaded: {file_path}")
-    return HttpResponse("Invalid request")
+
+@csrf_exempt
+@async_to_sync
+async def upload_pdf(request):
+    logger.debug("Received /upload_pdf request")
+    try:
+        if not request.session.session_key:
+            request.session.create()
+            logger.info(f"Created new session: {request.session.session_key}")
+        session_id = request.session.session_key
+        request.session.modified = True
+        logger.debug(f"Session ID: {session_id}")
+
+        if request.method == 'POST' and request.FILES.get('pdf'):
+            pdf_file = request.FILES['pdf']
+            file_path = default_storage.save(f'uploads/{session_id}_{pdf_file.name}', pdf_file)
+            vector_db, errors = await process_pdf(file_path, session_id)
+            if errors:
+                logger.error(f"PDF upload failed for session {session_id}: {errors[0]}")
+                return JsonResponse({'status': errors[0]}, status=400)
+            logger.info(f"PDF uploaded successfully: {file_path} for session {session_id}")
+            return JsonResponse({'status': f"Uploaded: {file_path}"})
+        logger.error(f"Invalid request for /upload_pdf: No PDF file provided")
+        return JsonResponse({'status': "Invalid request: No PDF file provided"}, status=400)
+    except Exception as e:
+        logger.error(f"Error in /upload_pdf for session {session_id}: {str(e)}")
+        return JsonResponse({'status': f"Failed: {str(e)}"}, status=500)
