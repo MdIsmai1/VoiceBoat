@@ -2,7 +2,7 @@ from django.db import models
 import uuid
 
 class Session(models.Model):
-    session_id = models.UUIDField(default=uuid.uuid4, unique=True)
+    session_id = models.UUIDField(primary_key=True, default=uuid.uuid4)
     django_session_key = models.CharField(max_length=40, unique=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     last_activity = models.DateTimeField(auto_now=True)
@@ -11,8 +11,8 @@ class Session(models.Model):
         app_label = 'rag'
 
 class Pdf(models.Model):
-    pdf_id = models.UUIDField(default=uuid.uuid4, unique=True)
-    file_name = models.CharField(max_length=255, null=True, blank=True)  # Changed to nullable
+    pdf_id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    file_name = models.CharField(max_length=255, null=True, blank=True)
     pdf_hash = models.CharField(max_length=64)
     session = models.ForeignKey(Session, on_delete=models.CASCADE)
 
