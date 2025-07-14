@@ -21,4 +21,4 @@ RUN python manage.py collectstatic --no-input
 COPY wait-for-db.sh .
 RUN chmod +x wait-for-db.sh
 
-CMD ["sh", "-c", "./wait-for-db.sh && python manage.py makemigrations rag && python manage.py migrate && gunicorn --bind 0.0.0.0:$PORT voice_pdf_rag.wsgi:application"]
+CMD ["sh", "-c", "./wait-for-db.sh && python manage.py makemigrations rag && python manage.py migrate && gunicorn --bind 0.0.0.0:${PORT:-10000} voice_pdf_rag.wsgi:application"]
