@@ -290,11 +290,13 @@ def index(request):
             logger.info(f"Created new session: {request.session.session_key}")
         session_key = request.session.session_key
         request.session.modified = True
+        logger.debug(f"Session key: {session_key}")
         # Create or update Session object
         session_obj, created = Session.objects.get_or_create(
             django_session_key=session_key,
             defaults={'session_id': uuid.uuid4(), 'last_activity': datetime.now()}
         )
+        logger.debug(f"Session object: {session_obj}, Created: {created}")
         if not created:
             session_obj.last_activity = datetime.now()
             session_obj.save()
