@@ -12,7 +12,7 @@ class Session(models.Model):
 
 class Pdf(models.Model):
     pdf_id = models.UUIDField(default=uuid.uuid4, unique=True)
-    file_name = models.CharField(max_length=255)
+    file_name = models.CharField(max_length=255, null=True, blank=True)  # Changed to nullable
     pdf_hash = models.CharField(max_length=64)
     session = models.ForeignKey(Session, on_delete=models.CASCADE)
 
