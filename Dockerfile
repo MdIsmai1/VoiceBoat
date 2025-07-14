@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y \
     libtesseract-dev \
     && apt-get clean
 
-# Upgrade pip to avoid dependency resolution issues
+# Upgrade pip
 RUN pip install --upgrade pip
 
 # Copy and install Python dependencies
@@ -22,8 +22,10 @@ COPY . .
 # Collect static files
 RUN python manage.py collectstatic --no-input
 
-# Run migrations
-RUN python run_migrations.py
+# Wait for database and run migrations
+COPY wait-for-db.sh .
+RUN chmod +x wait-for-db.sh
+RUN ./wait-for-db.sh && python manage.py migrate --noinput
 
-# Start Gunicorn with PORT environment variable
-CMD gunicorn voice_pdf_rag.wsgi:application --bind 0.0.0.0:$PORT
+# Start Gunicorn
+CMD gunicorn voice_pdf_rag.wsgi:application --bind 0.0.0.0:$PORT --timeout 120
