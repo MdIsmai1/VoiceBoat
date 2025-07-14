@@ -7,13 +7,13 @@ if [ -z "$DATABASE_URL" ]; then
 fi
 
 # Parse host and port from DATABASE_URL
-# Example: postgresql://user:password@host:port/dbname
-host=$(echo $DATABASE_URL | grep -oP '(?<=@)[^/]+' | cut -d':' -f1 || echo "")
-port=$(echo $DATABASE_URL | grep -oP ':[0-9]+(?=/)' | cut -d':' -f2 || echo "5432")  # Default to 5432 if port not found
+# Example: postgresql://user:password@host:port/dbname or postgresql://user:password@host/dbname
+host=$(echo $DATABASE_URL | grep -oP '(?<=@)[^/]+(?=/)' || echo "")
+port=$(echo $DATABASE_URL | grep -oP ':[0-9]+(?=/)' | cut -d':' -f2 || echo "5432")
 
-# Fallback for Render-specific URLs (e.g., host includes region like .oregon-postgres.render.com)
+# Fallback for Render-specific URLs with region (e.g., dpg-xxx.oregon-postgres.render.com)
 if [ -z "$host" ]; then
-    host=$(echo $DATABASE_URL | grep -oP '(?<=@)[^/]+(?=/)' || echo "")
+    host=$(echo $DATABASE_URL | grep -oP '(?<=@)[a-zA-Z0-9.-]+(?=/)' || echo "")
 fi
 
 if [ -z "$host" ]; then
@@ -22,7 +22,7 @@ if [ -z "$host" ]; then
 fi
 
 if [ -z "$port" ]; then
-    port="5432"  # Default PostgreSQL port
+    port="5432"
     echo "Warning: Could not parse port from DATABASE_URL: $DATABASE_URL. Using default port 5432."
 fi
 
