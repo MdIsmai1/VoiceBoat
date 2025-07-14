@@ -8,7 +8,7 @@ fi
 
 # Parse host and port from DATABASE_URL
 # Example: postgresql://user:password@host:port/dbname or postgresql://user:password@host/dbname
-host=$(echo $DATABASE_URL | grep -oP '(?<=@)[a-zA-Z0-9.-]+(?=/)' || echo "")
+host=$(echo $DATABASE_URL | grep -oP '(?<=@)[a-zA-Z0-9.-]+(?=[:/])' || echo "")
 port=$(echo $DATABASE_URL | grep -oP ':[0-9]+(?=/)' | cut -d':' -f2 || echo "5432")
 
 # Fallback for Render-specific URLs (e.g., dpg-xxx.oregon-postgres.render.com)
