@@ -12,7 +12,7 @@ import warnings
 import numpy as np
 from threading import Lock
 from concurrent.futures import ThreadPoolExecutor
-from django.http import JsonResponse, HttpResponse, FileResponse
+from django.http import HttpResponse, JsonResponse, FileResponse
 from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
@@ -106,15 +106,17 @@ async def process_pdf(pdf_file: str, session_id: str) -> Tuple[Optional[Chroma],
         with open(pdf_path, "rb") as f:
             pdf_hash = hashlib.sha256(f.read()).hexdigest()
 
-        pdf_exists = await sync_to_async(lambda: Pdf.objects.filter(pdf_hash=pdf_hash, session_id=session_id).exists())()
+        # Use django_session_key for session lookup
+        session = await sync_to_async(lambda: Session.objects.get(django_session_key=session_id))()
+        pdf_exists = await sync_to_async(lambda: Pdf.objects.filter(pdf_hash=pdf_hash, session=session).exists())()
         if pdf_exists:
             with vector_db_cache_lock:
-                cache_key = f"{session_id}:{pdf_hash}"
+                cache_key = f"{session.session_id}:{pdf_hash}"
                 if cache_key in vector_db_cache:
-                    logger.info(f"Using cached vector database for {pdf_path.name} in session {session_id}")
+                    logger.info(f"Using cached vector database for {pdf_path.name} in session {session.session_id}")
                     return vector_db_cache[cache_key], []
 
-        logger.info(f"Processing PDF: {pdf_path.name} for session {session_id}")
+        logger.info(f"Processing PDF: {pdf_path.name} for session {session.session_id}")
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_pdf_path = Path(tmp_dir) / pdf_path.name
             with open(pdf_path, "rb") as src, open(tmp_pdf_path, "wb") as dst:
@@ -150,17 +152,16 @@ async def process_pdf(pdf_file: str, session_id: str) -> Tuple[Optional[Chroma],
             text_splitter = RecursiveCharacterTextSplitter(chunk_size=300, chunk_overlap=50)
             chunks = text_splitter.split_documents(data)
 
-            persist_dir = Path(tempfile.gettempdir()) / f"chroma_{session_id}_{pdf_hash[:8]}"
+            persist_dir = Path(tempfile.gettempdir()) / f"chroma_{session.session_id}_{pdf_hash[:8]}"
             vector_db = Chroma.from_documents(
                 documents=chunks,
                 embedding=embeddings,
-                collection_name=f"pdf_collection_{pdf_hash[:8]}_{session_id}",
+                collection_name=f"pdf_collection_{pdf_hash[:8]}_{session.session_id}",
                 persist_directory=str(persist_dir)
             )
             with vector_db_cache_lock:
-                vector_db_cache[f"{session_id}:{pdf_hash}"] = vector_db
+                vector_db_cache[f"{session.session_id}:{pdf_hash}"] = vector_db
             
-            session = await sync_to_async(lambda: Session.objects.get(session_id=session_id))()
             await sync_to_async(Pdf.objects.create)(
                 session=session,
                 file_name=pdf_path.name,
@@ -201,7 +202,7 @@ async def chat_with_pdf(question: str, vector_db: Optional[Chroma], session_id: 
         )
 
         answer = await rag_chain.ainvoke(question)
-        session = await sync_to_async(lambda: Session.objects.get(session_id=session_id))()
+        session = await sync_to_async(lambda: Session.objects.get(django_session_key=session_id))()
         await sync_to_async(ConversationHistory.objects.create)(
             session=session,
             question=question,
@@ -287,8 +288,17 @@ def index(request):
         if not request.session.session_key:
             request.session.create()
             logger.info(f"Created new session: {request.session.session_key}")
+        session_key = request.session.session_key
         request.session.modified = True
-        return render(request, 'index.html', {'csrf_token': get_token(request), 'session_id': request.session.session_key})
+        # Create or update Session object
+        session_obj, created = Session.objects.get_or_create(
+            django_session_key=session_key,
+            defaults={'session_id': uuid.uuid4(), 'last_activity': datetime.now()}
+        )
+        if not created:
+            session_obj.last_activity = datetime.now()
+            session_obj.save()
+        return render(request, 'index.html', {'csrf_token': get_token(request), 'session_id': session_obj.session_id})
     except Exception as e:
         logger.error(f"Session creation failed in index view: {str(e)}")
         return HttpResponse(f"Session error: {str(e)}", status=500)
@@ -301,41 +311,44 @@ async def ask(request):
         if not request.session.session_key:
             request.session.create()
             logger.info(f"Created new session: {request.session.session_key}")
-        session_id = request.session.session_key
+        session_key = request.session.session_key
         request.session.modified = True
-        logger.debug(f"Session ID: {session_id}")
+        logger.debug(f"Session ID: {session_key}")
 
         # Update session last_activity
-        session = await sync_to_async(lambda: Session.objects.get_or_create(session_id=session_id, defaults={'last_activity': datetime.now()})[0])()
-        await sync_to_async(lambda: Session.objects.filter(session_id=session_id).update(last_activity=datetime.now()))()
+        session = await sync_to_async(lambda: Session.objects.get_or_create(
+            django_session_key=session_key,
+            defaults={'session_id': uuid.uuid4(), 'last_activity': datetime.now()}
+        )[0])()
+        await sync_to_async(lambda: Session.objects.filter(django_session_key=session_key).update(last_activity=datetime.now()))()
 
         pdf_file = request.FILES.get('pdf_file')
         pdf_path = None
         if pdf_file:
             filename = pdf_file.name
-            pdf_path = settings.MEDIA_ROOT / f"{session_id}_{filename}"
+            pdf_path = settings.MEDIA_ROOT / f"{session_key}_{filename}"
             with open(pdf_path, 'wb+') as destination:
                 for chunk in pdf_file.chunks():
                     destination.write(chunk)
-            logger.debug(f"Saved PDF to {pdf_path} for session {session_id}")
+            logger.debug(f"Saved PDF to {pdf_path} for session {session_key}")
 
         status = "Processing PDF..."
-        vector_db, errors = await process_pdf(str(pdf_path) if pdf_path else "", session_id)
+        vector_db, errors = await process_pdf(str(pdf_path) if pdf_path else "", session_key)
         if vector_db is None:
-            logger.error(f"PDF processing failed for session {session_id}: {errors[0] if errors else 'Unknown error'}")
+            logger.error(f"PDF processing failed for session {session_key}: {errors[0] if errors else 'Unknown error'}")
             return JsonResponse({'status': errors[0] if errors else "Failed: Unable to process PDF."}, status=400)
 
         question = ""
         if 'audio_data' in request.FILES:
             audio_file = request.FILES['audio_data']
-            audio_path = settings.MEDIA_ROOT / f"{session_id}_{audio_file.name}"
+            audio_path = settings.MEDIA_ROOT / f"{session_key}_{audio_file.name}"
             with open(audio_path, 'wb+') as destination:
                 for chunk in audio_file.chunks():
                     destination.write(chunk)
-            logger.debug(f"Saved audio to {audio_path} for session {session_id}")
+            logger.debug(f"Saved audio to {audio_path} for session {session_key}")
             status = "Transcribing audio..."
             try:
-                temp_wav_path = settings.MEDIA_ROOT / f"converted_{session_id}_{uuid.uuid4().hex[:8]}.wav"
+                temp_wav_path = settings.MEDIA_ROOT / f"converted_{session_key}_{uuid.uuid4().hex[:8]}.wav"
                 audio = AudioSegment.from_file(audio_path)
                 audio = audio.set_frame_rate(16000).set_channels(1).set_sample_width(2)
                 audio.export(temp_wav_path, format="wav")
@@ -346,40 +359,40 @@ async def ask(request):
                     recognizer.adjust_for_ambient_noise(source, duration=0.5)
                     audio_data = recognizer.record(source)
                 question = recognizer.recognize_google(audio_data)
-                logger.info(f"Recognized: '{question}' for session {session_id}")
+                logger.info(f"Recognized: '{question}' for session {session_key}")
                 os.remove(audio_path)
                 os.remove(temp_wav_path)
             except sr.UnknownValueError:
-                logger.error(f"Could not understand audio for session {session_id}")
+                logger.error(f"Could not understand audio for session {session_key}")
                 return JsonResponse({'status': "Failed: Could not understand audio."}, status=400)
             except Exception as e:
-                logger.error(f"Transcription error for session {session_id}: {str(e)}")
+                logger.error(f"Transcription error for session {session_key}: {str(e)}")
                 return JsonResponse({'status': f"Failed: Transcription error: {str(e)}."}, status=500)
         elif request.POST.get('text_input'):
             question = request.POST['text_input']
-            logger.info(f"Using text input: '{question}' for session {session_id}")
+            logger.info(f"Using text input: '{question}' for session {session_key}")
         else:
-            logger.error(f"No audio or text input provided for session {session_id}")
+            logger.error(f"No audio or text input provided for session {session_key}")
             return JsonResponse({'status': "Failed: No audio or text input provided."}, status=400)
 
         status = "Generating response..."
-        answer = await chat_with_pdf(question, vector_db, session_id)
+        answer = await chat_with_pdf(question, vector_db, session_key)
         if answer.startswith("Error"):
-            logger.error(f"RAG pipeline error for session {session_id}: {answer}")
+            logger.error(f"RAG pipeline error for session {session_key}: {answer}")
             return JsonResponse({'status': f"Failed: {answer}"}, status=500)
 
         status = "Generating audio response..."
         try:
-            audio_response_path = Path(tempfile.gettempdir()) / f"response_{session_id}_{uuid.uuid4().hex[:8]}.wav"
+            audio_response_path = Path(tempfile.gettempdir()) / f"response_{session_key}_{uuid.uuid4().hex[:8]}.wav"
             await save_tts_audio(answer, str(audio_response_path))
             os.chmod(audio_response_path, 0o600)
-            logger.info(f"Audio response generated at {audio_response_path} for session {session_id}")
+            logger.info(f"Audio response generated at {audio_response_path} for session {session_key}")
             return JsonResponse({'audio_path': f'/audio/{audio_response_path.name}', 'status': "Query processed successfully!"})
         except Exception as e:
-            logger.error(f"Error generating audio response for session {session_id}: {str(e)}")
+            logger.error(f"Error generating audio response for session {session_key}: {str(e)}")
             return JsonResponse({'status': f"Failed: Error generating audio response: {str(e)}. Text response: {answer}"}, status=500)
     except Exception as e:
-        logger.error(f"Unexpected error in /ask for session {session_id}: {str(e)}")
+        logger.error(f"Unexpected error in /ask for session {session_key}: {str(e)}")
         return JsonResponse({'status': f"Failed: Unexpected error: {str(e)}"}, status=500)
 
 @csrf_exempt
@@ -390,31 +403,34 @@ async def summary(request):
         if not request.session.session_key:
             request.session.create()
             logger.info(f"Created new session: {request.session.session_key}")
-        session_id = request.session.session_key
+        session_key = request.session.session_key
         request.session.modified = True
-        logger.debug(f"Session ID: {session_id}")
+        logger.debug(f"Session ID: {session_key}")
 
         # Update session last_activity
-        await sync_to_async(lambda: Session.objects.get_or_create(session_id=session_id, defaults={'last_activity': datetime.now()})[0])()
-        await sync_to_async(lambda: Session.objects.filter(session_id=session_id).update(last_activity=datetime.now()))()
+        session = await sync_to_async(lambda: Session.objects.get_or_create(
+            django_session_key=session_key,
+            defaults={'session_id': uuid.uuid4(), 'last_activity': datetime.now()}
+        )[0])()
+        await sync_to_async(lambda: Session.objects.filter(django_session_key=session_key).update(last_activity=datetime.now()))()
 
         data = json.loads(request.body.decode('utf-8'))
         is_visible = data.get('is_visible', False)
         
         if is_visible:
-            history = await sync_to_async(lambda: list(ConversationHistory.objects.filter(session__session_id=session_id).order_by('timestamp')))()
+            history = await sync_to_async(lambda: list(ConversationHistory.objects.filter(session__django_session_key=session_key).order_by('timestamp')))()
             if not history:
-                logger.info(f"No conversation history available for session {session_id}")
+                logger.info(f"No conversation history available for session {session_key}")
                 return JsonResponse({'summary': "No conversation history available.", 'is_visible': True})
             summary = "<h3 class='text-lg font-semibold text-gray-800 mb-2'>Conversation History</h3>"
             for entry in history:
                 summary += f"<p class='mb-2'><strong class='text-gray-700'>Timestamp:</strong> {entry.timestamp}<br><strong class='text-gray-700'>Question:</strong> {entry.question}<br><strong class='text-gray-700'>Answer:</strong> {entry.answer}</p><hr class='border-gray-200 my-2'>"
-            logger.info(f"Returning conversation summary for session {session_id}")
+            logger.info(f"Returning conversation summary for session {session_key}")
             return JsonResponse({'summary': summary, 'is_visible': True})
-        logger.info(f"Hiding conversation summary for session {session_id}")
+        logger.info(f"Hiding conversation summary for session {session_key}")
         return JsonResponse({'summary': "", 'is_visible': False})
     except Exception as e:
-        logger.error(f"Error in /summary for session {session_id}: {str(e)}")
+        logger.error(f"Error in /summary for session {session_key}: {str(e)}")
         return JsonResponse({'summary': f"Failed: Error retrieving conversation history: {str(e)}", 'is_visible': False}, status=500)
 
 @csrf_exempt
@@ -425,39 +441,42 @@ async def reset(request):
         if not request.session.session_key:
             request.session.create()
             logger.info(f"Created new session: {request.session.session_key}")
-        session_id = request.session.session_key
+        session_key = request.session.session_key
         request.session.modified = True
-        logger.debug(f"Resetting session {session_id}")
+        logger.debug(f"Resetting session {session_key}")
 
         # Update session last_activity
-        await sync_to_async(lambda: Session.objects.get_or_create(session_id=session_id, defaults={'last_activity': datetime.now()})[0])()
-        await sync_to_async(lambda: Session.objects.filter(session_id=session_id).update(last_activity=datetime.now()))()
+        session = await sync_to_async(lambda: Session.objects.get_or_create(
+            django_session_key=session_key,
+            defaults={'session_id': uuid.uuid4(), 'last_activity': datetime.now()}
+        )[0])()
+        await sync_to_async(lambda: Session.objects.filter(django_session_key=session_key).update(last_activity=datetime.now()))()
 
         # Clear all session-related data
         with vector_db_cache_lock:
             for key in list(vector_db_cache.keys()):
-                if key.startswith(str(session_id)):
+                if key.startswith(str(session.session_id)):
                     try:
                         vector_db_cache[key].delete_collection()
                         del vector_db_cache[key]
-                        logger.info(f"Deleted vector DB for session {session_id}: {key}")
+                        logger.info(f"Deleted vector DB for session {session.session_id}: {key}")
                     except Exception as e:
-                        logger.warning(f"Error deleting vector DB for session {session_id}: {str(e)}")
-        await sync_to_async(Pdf.objects.filter(session__session_id=session_id).delete)()
-        await sync_to_async(ConversationHistory.objects.filter(session__session_id=session_id).delete)()
-        await sync_to_async(Session.objects.filter(session_id=session_id).delete)()
+                        logger.warning(f"Error deleting vector DB for session {session.session_id}: {str(e)}")
+        await sync_to_async(Pdf.objects.filter(session__django_session_key=session_key).delete)()
+        await sync_to_async(ConversationHistory.objects.filter(session__django_session_key=session_key).delete)()
+        await sync_to_async(Session.objects.filter(django_session_key=session_key).delete)()
 
         # Create a new session
         request.session.flush()
         request.session.create()
         request.session.modified = True
-        new_session_id = request.session.session_key
-        await sync_to_async(Session.objects.create)(session_id=new_session_id, last_activity=datetime.now())
-        logger.info(f"Created new session {new_session_id} after reset")
+        new_session_key = request.session.session_key
+        await sync_to_async(Session.objects.create)(django_session_key=new_session_key, session_id=uuid.uuid4(), last_activity=datetime.now())
+        logger.info(f"Created new session {new_session_key} after reset")
 
-        return JsonResponse({'status': "Bot reset successfully!", 'session_id': new_session_id})
+        return JsonResponse({'status': "Bot reset successfully!", 'session_id': new_session_key})
     except Exception as e:
-        logger.error(f"Error in /reset for session {session_id}: {str(e)}")
+        logger.error(f"Error in /reset for session {session_key}: {str(e)}")
         return JsonResponse({'status': f"Failed: Error resetting conversation: {str(e)}"}, status=500)
 
 def serve_audio(request, filename):
@@ -476,21 +495,28 @@ async def upload_pdf(request):
         if not request.session.session_key:
             request.session.create()
             logger.info(f"Created new session: {request.session.session_key}")
-        session_id = request.session.session_key
+        session_key = request.session.session_key
         request.session.modified = True
-        logger.debug(f"Session ID: {session_id}")
+        logger.debug(f"Session ID: {session_key}")
+
+        # Update session last_activity
+        session = await sync_to_async(lambda: Session.objects.get_or_create(
+            django_session_key=session_key,
+            defaults={'session_id': uuid.uuid4(), 'last_activity': datetime.now()}
+        )[0])()
+        await sync_to_async(lambda: Session.objects.filter(django_session_key=session_key).update(last_activity=datetime.now()))()
 
         if request.method == 'POST' and request.FILES.get('pdf'):
             pdf_file = request.FILES['pdf']
-            file_path = default_storage.save(f'uploads/{session_id}_{pdf_file.name}', pdf_file)
-            vector_db, errors = await process_pdf(file_path, session_id)
+            file_path = default_storage.save(f'uploads/{session_key}_{pdf_file.name}', pdf_file)
+            vector_db, errors = await process_pdf(file_path, session_key)
             if errors:
-                logger.error(f"PDF upload failed for session {session_id}: {errors[0]}")
+                logger.error(f"PDF upload failed for session {session_key}: {errors[0]}")
                 return JsonResponse({'status': errors[0]}, status=400)
-            logger.info(f"PDF uploaded successfully: {file_path} for session {session_id}")
+            logger.info(f"PDF uploaded successfully: {file_path} for session {session_key}")
             return JsonResponse({'status': f"Uploaded: {file_path}"})
         logger.error(f"Invalid request for /upload_pdf: No PDF file provided")
         return JsonResponse({'status': "Invalid request: No PDF file provided"}, status=400)
     except Exception as e:
-        logger.error(f"Error in /upload_pdf for session {session_id}: {str(e)}")
+        logger.error(f"Error in /upload_pdf for session {session_key}: {str(e)}")
         return JsonResponse({'status': f"Failed: {str(e)}"}, status=500)
