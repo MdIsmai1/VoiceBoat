@@ -23,10 +23,9 @@ COPY . .
 # Collect static files
 RUN python manage.py collectstatic --no-input
 
-# Wait for database and run migrations
+# Copy and make wait-for-db.sh executable
 COPY wait-for-db.sh .
 RUN chmod +x wait-for-db.sh
-RUN ./wait-for-db.sh && python manage.py migrate --noinput || { echo "Migration failed"; exit 1; }
 
-# Start Gunicorn
-CMD gunicorn voice_pdf_rag.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+# Run migrations at startup (not build time) to ensure DATABASE_URL is available
+CMD ./wait-for-db.sh && python manage.py migrate --noinput && gunicorn voice_pdf_rag.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --timeout 120
