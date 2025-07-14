@@ -1,25 +1,37 @@
 from django.db import models
 import uuid
 
-class Pdf(models.Model):
-    pdf_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    # Other fields (add your existing fields here, e.g., file_name, etc.)
-    file_name = models.CharField(max_length=255)  # Example field, adjust as needed
+class Session(models.Model):
+    session_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_activity = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'pdf'  # Optional: ensures table name is 'pdf'
+        db_table = 'session'
 
-# Other models (e.g., ConversationHistory, Session) can remain unchanged
+    def __str__(self):
+        return str(self.session_id)
+
+class Pdf(models.Model):
+    pdf_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    file_name = models.CharField(max_length=255)
+    pdf_hash = models.CharField(max_length=64)  # Assuming hash is a string (e.g., SHA256)
+    session = models.ForeignKey(Session, on_delete=models.CASCADE, related_name='pdfs')
+
+    class Meta:
+        db_table = 'pdf'
+
+    def __str__(self):
+        return self.file_name
+
 class ConversationHistory(models.Model):
-    # Add your fields here
-    pass
+    session = models.ForeignKey(Session, on_delete=models.CASCADE, related_name='conversations')
+    question = models.TextField()
+    answer = models.TextField()
+    timestamp = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = 'conversationhistory'
 
-class Session(models.Model):
-    # Add your fields here
-    pass
-
-    class Meta:
-        db_table = 'session'
+    def __str__(self):
+        return f"{self.session.session_id} - {self.timestamp}"
